@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -102,7 +101,7 @@ func intMain() int {
 		return 1
 	}
 	imageName := flag.Args()[0]
-
+	//创建一个安全对象
 	minSeverity, err := database.NewSeverity(*flagMinimumSeverity)
 	if err != nil {
 		flag.Usage()
@@ -115,13 +114,13 @@ func intMain() int {
 		color.NoColor = false
 	}
 
-	// Create a temporary folder.
+	// 创建一个临时目录，存放打包的layer
 	tmpPath, err := ioutil.TempDir("", "analyze-local-image-")
-	if err != nil {
+ 	if err != nil {
 		log.Fatalf("Could not create temporary folder: %s", err)
 	}
 	defer os.RemoveAll(tmpPath)
-
+	//创建一个接收出错信号信道
 	// Intercept SIGINT / SIGKILl signals.
 	interrupt := make(chan os.Signal)
 	signal.Notify(interrupt, os.Interrupt, os.Kill)
@@ -143,10 +142,33 @@ func intMain() int {
 	}
 	return 0
 }
-
+//分析本地镜像
 func AnalyzeLocalImage(imageName string, minSeverity database.Severity, endpoint, myAddress, tmpPath string) error {
 	// Save image.
 	log.Printf("Saving %s to local disk (this may take some time)", imageName)
+	//把镜像save到本地一个目录下，不是save到一个文件哦。
+	/*
+	lynzabo@ubuntu:/tmp/analyze-local-image-160262935$ tree
+	.
+	├── 05a60462f8bafb215ddc5c20a364b5fb637670200a74a5bb13a1b23f64515561.json
+	├── 8db2aad32a9f874e4212dde408c14ae0ba1c2e0d1b80484e223b2ff966386108
+	│   ├── json
+	│   ├── layer.tar
+	│   └── VERSION
+	├── 908fdb1e18ef1ed3bdd042820eb55d62b9057ee62bff09bac459d1b1ba692406
+	│   ├── json
+	│   ├── layer.tar
+	│   └── VERSION
+	├── 98f8314de6153f843cfc03062af5cb8269db2b87272f10406420f26af5446c5c
+	│   ├── json
+	│   ├── layer.tar
+	│   └── VERSION
+	├── manifest.json
+	└── repositories
+
+	3 directories, 12 files
+	lynzabo@ubuntu:/tmp/analyze-local-image-160262935$
+	*/
 	err := save(imageName, tmpPath)
 	if err != nil {
 		return fmt.Errorf("Could not save image: %s", err)
@@ -161,7 +183,7 @@ func AnalyzeLocalImage(imageName string, minSeverity database.Severity, endpoint
 	if err != nil || len(layerIDs) == 0 {
 		return fmt.Errorf("Could not get image's history: %s", err)
 	}
-
+	//如果clair不再本地安装，则在本地启动一个HTTP服务，设置让calir来远程下载文件
 	// Setup a simple HTTP server if Clair is not local.
 	if !strings.Contains(endpoint, "127.0.0.1") && !strings.Contains(endpoint, "localhost") {
 		allowedHost := strings.TrimPrefix(endpoint, "http://")
@@ -183,7 +205,7 @@ func AnalyzeLocalImage(imageName string, minSeverity database.Severity, endpoint
 
 		tmpPath = "http://" + myAddress + ":" + strconv.Itoa(httpPort)
 	}
-
+	//设置让分析所有的层
 	// Analyze layers.
 	log.Printf("Analyzing %d layers... \n", len(layerIDs))
 	for i := 0; i < len(layerIDs); i++ {
@@ -367,15 +389,19 @@ func historyFromCommand(imageName string) ([]string, error) {
 func listenHTTP(path, allowedHost string, ch chan error) {
 	restrictedFileServer := func(path, allowedHost string) http.Handler {
 		fc := func(w http.ResponseWriter, r *http.Request) {
-			host, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err == nil && strings.EqualFold(host, allowedHost) {
-				http.FileServer(http.Dir(path)).ServeHTTP(w, r)
-				return
-			}
-			w.WriteHeader(403)
+			//不要做请求IP限制,否则，只能在一个大二层通信，这里收到的IP为网关地址
+			http.FileServer(http.Dir(path)).ServeHTTP(w, r)
+			return
+			//host, _, err := net.SplitHostPort(r.RemoteAddr)
+			//if err == nil && strings.EqualFold(host, allowedHost) {
+			//	http.FileServer(http.Dir(path)).ServeHTTP(w, r)
+			//	return
+			//}
+			//w.WriteHeader(403)
 		}
 		return http.HandlerFunc(fc)
-	}
+
+		}
 
 	ch <- http.ListenAndServe(":"+strconv.Itoa(httpPort), restrictedFileServer(path, allowedHost))
 }
@@ -384,7 +410,7 @@ func analyzeLayer(endpoint, path, layerName, parentLayerName string) error {
 	payload := v1.LayerEnvelope{
 		Layer: &v1.Layer{
 			Name:       layerName,
-			Path:       path,
+			Path:       path,//如果clair不再本地，则这里是个远程HTTP地址。http://192.168.40.129:9279/8db2aad32a9f874e4212dde408c14ae0ba1c2e0d1b80484e223b2ff966386108/layer.tar
 			ParentName: parentLayerName,
 			Format:     "Docker",
 		},
