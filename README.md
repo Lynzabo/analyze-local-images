@@ -125,5 +125,5 @@ As it runs an HTTP server and not an HTTP**S** one, be sure to **not** expose se
 ./analyze-local-images -endpoint "http://192.168.10.11:6060" -my-address "192.168.10.34" nginx:1.11.5
 ```
 它的做法是，
-1.在本地Docker save这个本镜像，得到manifest 文件，从中取所有layer的digest，本地启动一个web服务，拼接一个让clair下载layer的大请求，让clair来下载这些layer文件。
-2.调clair接口，获取漏洞，传递最外层的layer digest。
+1. 在本地Docker save这个本镜像，得到manifest 文件，从中取所有layer的digest，本地启动一个web服务，拼接一个让clair下载layer的大请求，让clair来下载这些layer文件。
+2. 调clair接口，获取漏洞，传递最外层的layer digest。
